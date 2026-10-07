@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "simple_http_upload"
-version = "0.1.0"
+name = "simplehttpupload"
+version = "0.1.1"

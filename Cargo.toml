@@ -1,6 +1,6 @@
 [package]
-name = "simple_http_upload"
-version = "0.1.0"
+name = "simplehttpupload"
+version = "0.1.1"
 edition = "2021"
 description = "Tiny file-drop server with a web interface (std only)"
 
