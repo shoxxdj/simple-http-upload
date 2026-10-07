@@ -1,0 +1,13 @@
+[package]
+name = "simple_http_upload"
+version = "0.1.0"
+edition = "2021"
+description = "Tiny file-drop server with a web interface (std only)"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

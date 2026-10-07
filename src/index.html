@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upload · {{PATH}}</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg:      light-dark(#fafafa, #0b0b0c);
+    --surface: light-dark(#ffffff, #141416);
+    --line:    light-dark(#e4e4e7, #26262b);
+    --text:    light-dark(#18181b, #f4f4f5);
+    --muted:   light-dark(#71717a, #8b8b95);
+    --accent:  light-dark(#4f46e5, #8b8cf8);
+    --ok:      light-dark(#16a34a, #4ade80);
+    --err:     light-dark(#dc2626, #f87171);
+    --radius:  14px;
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  main { max-width: 42rem; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+  a { color: inherit; text-decoration: none; }
+
+  h1 { font-size: 1.5rem; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 .25rem; }
+  .crumbs { color: var(--muted); font-size: .9rem; margin-bottom: 1.75rem; overflow-wrap: anywhere; }
+  .crumbs a:hover { color: var(--accent); }
+  .crumbs span { margin: 0 .3em; opacity: .5; }
+
+  #drop {
+    display: block; cursor: pointer; text-align: center;
+    padding: 2.75rem 1.5rem;
+    border: 1.5px dashed var(--line); border-radius: var(--radius);
+    background: var(--surface);
+    transition: border-color .15s, background-color .15s;
+  }
+  #drop:hover, #drop.over, #drop:focus-within {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 7%, var(--surface));
+  }
+  #drop strong { display: block; font-weight: 600; }
+  #drop small { color: var(--muted); }
+  #drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  #queue { display: grid; gap: .75rem; margin-top: 1rem; }
+  #queue:empty { display: none; }
+  .item { padding: .85rem 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .top { display: flex; justify-content: space-between; gap: 1rem; font-size: .9rem; }
+  .name { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; margin-top: .6rem; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .15s linear, background-color .2s; }
+  .item.done .bar i { background: var(--ok); }
+  .item.fail .bar i { background: var(--err); }
+  .item.fail .meta { color: var(--err); }
+
+  #files { margin-top: 2.5rem; }
+  #files h2 { display: flex; align-items: center; gap: .5rem; margin: 0 0 .5rem; font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #files h2 span { padding: 0 .5em; border-radius: 99px; background: var(--line); font-variant-numeric: tabular-nums; }
+  #files ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  #files li { display: flex; justify-content: space-between; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+  #files li a { overflow-wrap: anywhere; }
+  #files li a:hover { color: var(--accent); }
+  #files li a.dir { color: var(--accent); font-weight: 550; }
+  #files li span { color: var(--muted); font-size: .9rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); }
+
+  #cheat { margin-top: 2.5rem; }
+  #cheat h2 { margin: 0 0 .75rem; font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #cheat dl { margin: 0; display: grid; gap: .9rem; }
+  #cheat dt { font-size: .85rem; color: var(--muted); margin-bottom: .25rem; }
+  #cheat dd { margin: 0; }
+  #cheat code {
+    display: block; padding: .6rem .85rem; overflow-x: auto; white-space: pre;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    font: .85rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    user-select: all; /* one click selects the whole command */
+  }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Upload files</h1>
+  <nav class="crumbs">{{CRUMBS}}</nav>
+
+  <label id="drop">
+    <input id="input" type="file" multiple>
+    <strong>Drop files here</strong>
+    <small>or click to browse</small>
+  </label>
+  <div id="queue"></div>
+
+  {{LIST}}
+
+  <section id="cheat">
+    <h2>Command line</h2>
+    <dl id="cheat-list"></dl>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const drop = $('#drop'), input = $('#input'), queue = $('#queue');
+  const base = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
+  let busy = 0;
+
+  // Command-line cheatsheet, built from the current address.
+  const url = location.origin + base;
+  const cheats = [
+    ['Upload a file', `curl -T file ${url}`],
+    ['Upload several files', `curl -T "{a.zip,b.zip}" ${url}`],
+    ['Download a file', `curl -O ${url}file`],
+  ];
+  for (const [label, cmd] of cheats) {
+    const dt = document.createElement('dt'), dd = document.createElement('dd'), code = document.createElement('code');
+    dt.textContent = label; code.textContent = cmd;
+    dd.appendChild(code);
+    $('#cheat-list').append(dt, dd);
+  }
+
+  const size = n => {
+    const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i ? n.toFixed(n >= 100 ? 0 : 1) : n) + ' ' + u[i];
+  };
+
+  function row(file) {
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = '<div class="top"><span class="name"></span><span class="meta"></span></div>' +
+                   '<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><i></i></div>';
+    el.querySelector('.name').textContent = file.name;
+    const meta = el.querySelector('.meta'), bar = el.querySelector('.bar'), fill = bar.firstChild;
+    const set = (pct, text) => {
+      fill.style.width = pct + '%';
+      bar.setAttribute('aria-valuenow', Math.round(pct));
+      meta.textContent = text;
+    };
+    set(0, 'Queued · ' + size(file.size));
+    queue.appendChild(el);
+    return {
+      set,
+      done: text => { el.className = 'item done'; set(100, text); },
+      fail: text => { el.className = 'item fail'; meta.textContent = text; },
+    };
+  }
+
+  function send(file, r) {
+    return new Promise(resolve => {
+      const xhr = new XMLHttpRequest();
+      let lastT = performance.now(), lastL = 0, speed = 0;
+      xhr.open('PUT', base + encodeURIComponent(file.name));
+
+      xhr.upload.onprogress = e => {
+        const now = performance.now();
+        if (now - lastT >= 250) {
+          const inst = (e.loaded - lastL) / ((now - lastT) / 1000);
+          speed = speed ? speed * 0.7 + inst * 0.3 : inst;
+          lastT = now; lastL = e.loaded;
+        }
+        const pct = e.total ? (e.loaded / e.total) * 100 : 0;
+        r.set(pct, e.loaded >= e.total
+          ? 'Finalizing…'
+          : `${Math.floor(pct)}% · ${size(e.loaded)} / ${size(e.total)}` + (speed ? ` · ${size(speed)}/s` : ''));
+      };
+      xhr.onload = () => {
+        let res = {};
+        try { res = JSON.parse(xhr.responseText); } catch {}
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const renamed = res.name && res.name !== file.name ? ` · saved as “${res.name}”` : '';
+          r.done(size(file.size) + ' · done' + renamed);
+          resolve(true);
+        } else {
+          r.fail(res.error || 'Error ' + xhr.status);
+          resolve(false);
+        }
+      };
+      xhr.onerror = xhr.ontimeout = () => { r.fail('Connection lost'); resolve(false); };
+      xhr.send(file);
+    });
+  }
+
+  async function refresh() {
+    const box = $('#files');
+    if (!box) return;
+    try {
+      const res = await fetch(base, { cache: 'no-store' });
+      const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+      const fresh = doc.querySelector('#files');
+      if (fresh) box.replaceWith(fresh);
+    } catch {}
+  }
+
+  let chain = Promise.resolve();
+  function enqueue(files) {
+    const jobs = [...files].map(f => [f, row(f)]);
+    if (!jobs.length) return;
+    chain = chain.then(async () => {
+      busy++;
+      let any = false;
+      for (const [f, r] of jobs) any = (await send(f, r)) || any;
+      busy--;
+      if (any) await refresh();
+    });
+  }
+
+  input.addEventListener('change', () => { enqueue(input.files); input.value = ''; });
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => enqueue(e.dataTransfer.files));
+  // A file dropped outside the drop zone must not navigate away from the page.
+  ['dragover', 'drop'].forEach(t => window.addEventListener(t, e => e.preventDefault()));
+  window.addEventListener('beforeunload', e => { if (busy) e.preventDefault(); });
+})();
+</script>
+</body>
+</html>
